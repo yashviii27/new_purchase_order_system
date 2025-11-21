@@ -10,7 +10,7 @@ export class PurchaseService {
   constructor(
     @InjectModel(PurchaseMaster.name)
     private readonly poMasterModel: Model<PurchaseMaster>,
-      
+
     @InjectModel(PurchaseDetail.name)
     private readonly poDetailModel: Model<PurchaseDetail>,
 
@@ -19,14 +19,13 @@ export class PurchaseService {
   ) {}
 
   // =========================================================================
-  // 1) CREATE PURCHASE ORDER (auto-rate + amount calculation)
+  // CREATE PURCHASE ORDER
   // =========================================================================
   async createPurchase(dto: any) {
     if (!dto.details || dto.details.length === 0) {
       throw new Error('Purchase Order must have at least one item.');
     }
 
-    // STEP 1: calculate sub_totals & amount
     let po_amount = 0;
 
     const detailRows = dto.details.map((d) => {
@@ -35,17 +34,16 @@ export class PurchaseService {
       po_amount += subTotal;
 
       return {
-        po_id: undefined, // assign later
+        po_id: undefined,
         po_sr: d.po_sr,
         pro_id: d.pro_id,
         po_qty: d.po_qty,
         po_rate: rate,
         po_sub_total: subTotal,
-        po_adj_qty: d.po_adj_qty ?? 0,
+        po_adj_qty: 0,
       };
     });
 
-    // STEP 2: create master
     const poMaster = await this.poMasterModel.create({
       po_no: dto.po_no,
       po_date: dto.po_date,
@@ -58,7 +56,6 @@ export class PurchaseService {
       po_is_active: true,
     });
 
-    // STEP 3: assign po_id and insert details
     detailRows.forEach((d) => (d.po_id = poMaster._id));
     await this.poDetailModel.insertMany(detailRows);
 
@@ -70,11 +67,10 @@ export class PurchaseService {
   }
 
   // =========================================================================
-  // 2) REVISE PURCHASE ORDER (auto pending + auto rate inheritance)
+  // REVISE PURCHASE ORDER
   // =========================================================================
   async revisePurchase(po_no: string, dto: any) {
     try {
-      // find active revision
       const oldPO: any = await this.poMasterModel.findOne({
         po_no,
         po_is_active: true,
@@ -82,19 +78,14 @@ export class PurchaseService {
 
       if (!oldPO) throw new NotFoundException('Active PO Not Found');
 
-      // fetch previous details
       const oldDetails = await this.poDetailModel.find({ po_id: oldPO._id });
-
-      // fetch all revisions
       const allRevisions = await this.poMasterModel.find({ po_no });
       const poIds = allRevisions.map((p) => p._id);
 
-      // fetch GRN for all revisions
       const grnDetails = await this.grnDetailModel
         .find({})
         .populate({ path: 'grn_id', select: 'po_id' });
 
-      // old pending qty mapping
       const oldPendingMap: Record<number, number> = {};
       const oldRateMap: Record<number, number> = {};
 
@@ -112,19 +103,19 @@ export class PurchaseService {
           })
           .reduce((sum, x) => sum + (x.grn_rec_qty || 0), 0);
 
-        const pending = row.po_qty - (received + (row.po_adj_qty || 0));
+        const totalRequired = row.po_qty + (row.po_adj_qty || 0);
+        const pending = totalRequired - received;
+
         oldPendingMap[row.po_sr] = pending > 0 ? pending : 0;
       });
 
-      // deactivate old PO
       oldPO.po_is_active = false;
       await oldPO.save();
 
-      // NEW MASTER — rate & amount will be recalculated later
       const newPO = await this.poMasterModel.create({
         po_no,
         po_date: dto.po_date,
-        po_amount: 0, // temp, calculate later
+        po_amount: 0,
         sup_id: oldPO.sup_id,
         transportation: oldPO.transportation,
         notes: oldPO.notes,
@@ -134,19 +125,16 @@ export class PurchaseService {
         prev_po_id: oldPO._id,
       });
 
-      // ==========================
-      // NEW DETAILS + AUTO RATE + AUTO ADJ QTY
-      // ==========================
       let newAmount = 0;
 
       const newDetailRows = dto.details.map((row) => {
         const rate =
-          row.po_rate !== undefined
-            ? row.po_rate
-            : oldRateMap[row.po_sr] ?? 0; // auto inherit rate
+          row.po_rate !== undefined ? row.po_rate : oldRateMap[row.po_sr] ?? 0;
 
         const adjQty = oldPendingMap[row.po_sr] ?? 0;
-        const subTotal = row.po_qty * rate;
+        const totalRequired = row.po_qty + adjQty;
+        const subTotal = totalRequired * rate;
+
         newAmount += subTotal;
 
         return {
@@ -160,10 +148,8 @@ export class PurchaseService {
         };
       });
 
-      // save details
       await this.poDetailModel.insertMany(newDetailRows);
 
-      // update master with correct amount
       newPO.po_amount = newAmount;
       await newPO.save();
 
@@ -179,7 +165,7 @@ export class PurchaseService {
   }
 
   // =========================================================================
-  // 3) GET STATUS (ALL REVISIONS + GRN MERGE)
+  // GET STATUS (CORRECTED PENDING LOGIC)
   // =========================================================================
   async getPoStatus(id: string) {
     let poMaster: any = null;
@@ -223,12 +209,13 @@ export class PurchaseService {
         })
         .reduce((sum, x) => sum + (x.grn_rec_qty || 0), 0);
 
-      const pending = row.po_qty - (received + (row.po_adj_qty || 0));
+      const totalRequired = row.po_qty + (row.po_adj_qty || 0);
+      const pending = totalRequired - received;
 
       return {
         ...row.toObject(),
         po_rec_qty: received,
-        pending_qty: pending,
+        pending_qty: pending < 0 ? 0 : pending,
         status: pending <= 0 ? 'Completed' : 'Pending',
       };
     });

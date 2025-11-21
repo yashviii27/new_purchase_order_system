@@ -5,10 +5,11 @@ import { GrnDetailDto } from './grn-detail.dto';
 export class CreateGrnDto {
 
   @IsString()
-  po_id: string;            
+  po_id: string;
 
   @IsString()
-  grn_no: string;           
+  grn_no: string;
+
   @IsDateString()
   grn_date: string;
 
