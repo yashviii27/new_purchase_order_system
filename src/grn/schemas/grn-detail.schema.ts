@@ -13,13 +13,17 @@ export class GrnDetail {
   po_id: Types.ObjectId;
 
   @Prop({ required: true })
-  po_sr: number;              // PO serial line
+  po_sr: number;
 
   @Prop({ required: true })
   pro_id: number;
 
   @Prop({ required: true })
   grn_rec_qty: number;
+
+  // ✅ NEW FIELD
+  @Prop({ default: false })
+  is_extra_stock: boolean;
 }
 
 export const GrnDetailSchema = SchemaFactory.createForClass(GrnDetail);

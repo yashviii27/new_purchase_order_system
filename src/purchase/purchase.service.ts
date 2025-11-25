@@ -5,6 +5,13 @@ import { PurchaseMaster } from './schemas/purchase-master.schema';
 import { PurchaseDetail } from './schemas/purchase-detail.schema';
 import { GrnDetail } from '../grn/schemas/grn-detail.schema';
 
+export interface PoStatusResult {
+  message: string;
+  po_status: 'Open' | 'Closed';
+  poMaster: any;
+  details: any[];
+}
+
 @Injectable()
 export class PurchaseService {
   constructor(
@@ -18,9 +25,9 @@ export class PurchaseService {
     private readonly grnDetailModel: Model<GrnDetail>,
   ) {}
 
-  // =========================================================================
+  // ==================================================
   // CREATE PURCHASE ORDER
-  // =========================================================================
+  // ==================================================
   async createPurchase(dto: any) {
     if (!dto.details || dto.details.length === 0) {
       throw new Error('Purchase Order must have at least one item.');
@@ -54,150 +61,44 @@ export class PurchaseService {
       notes: dto.notes,
       po_rev_reason: dto.po_rev_reason ?? null,
       po_is_active: true,
+      po_is_closed: false,
     });
 
     detailRows.forEach((d) => (d.po_id = poMaster._id));
     await this.poDetailModel.insertMany(detailRows);
 
     return {
-      message: 'Purchase Order Created Successfully',
+      message: 'Purchase Order Created Successfully ✅',
       po_id: poMaster._id,
       po_no: poMaster.po_no,
     };
   }
 
-  // =========================================================================
+  // ==================================================
   // REVISE PURCHASE ORDER
-  // =========================================================================
+  // ==================================================
   async revisePurchase(po_no: string, dto: any) {
-    try {
-      const oldPO: any = await this.poMasterModel.findOne({
-        po_no,
-        po_is_active: true,
-      });
-
-      if (!oldPO) throw new NotFoundException('Active PO Not Found');
-
-      const oldDetails = await this.poDetailModel.find({ po_id: oldPO._id });
-      const allRevisions = await this.poMasterModel.find({ po_no });
-      const poIds = allRevisions.map((p) => p._id);
-
-      const grnDetails = await this.grnDetailModel
-        .find({})
-        .populate({ path: 'grn_id', select: 'po_id' });
-
-      const oldPendingMap: Record<number, number> = {};
-      const oldRateMap: Record<number, number> = {};
-
-      oldDetails.forEach((row) => {
-        oldRateMap[row.po_sr] = row.po_rate ?? 0;
-
-        const received = grnDetails
-          .filter((g) => {
-            const grnPoId = (g.grn_id as any)?.po_id;
-            return (
-              grnPoId &&
-              poIds.some((pid) => pid.equals(grnPoId)) &&
-              g.po_sr === row.po_sr
-            );
-          })
-          .reduce((sum, x) => sum + (x.grn_rec_qty || 0), 0);
-
-        const totalRequired = row.po_qty + (row.po_adj_qty || 0);
-        const pending = totalRequired - received;
-
-        oldPendingMap[row.po_sr] = pending > 0 ? pending : 0;
-      });
-
-      oldPO.po_is_active = false;
-      await oldPO.save();
-
-      const newPO = await this.poMasterModel.create({
-        po_no,
-        po_date: dto.po_date,
-        po_amount: 0,
-        sup_id: oldPO.sup_id,
-        transportation: oldPO.transportation,
-        notes: oldPO.notes,
-        po_rev_reason: dto.po_rev_reason,
-        po_rev: oldPO.po_rev + 1,
-        po_is_active: true,
-        prev_po_id: oldPO._id,
-      });
-
-      let newAmount = 0;
-
-      const newDetailRows = dto.details.map((row) => {
-        const rate =
-          row.po_rate !== undefined ? row.po_rate : oldRateMap[row.po_sr] ?? 0;
-
-        const adjQty = oldPendingMap[row.po_sr] ?? 0;
-        const totalRequired = row.po_qty + adjQty;
-        const subTotal = totalRequired * rate;
-
-        newAmount += subTotal;
-
-        return {
-          po_id: newPO._id,
-          po_sr: row.po_sr,
-          pro_id: row.pro_id,
-          po_qty: row.po_qty,
-          po_rate: rate,
-          po_sub_total: subTotal,
-          po_adj_qty: adjQty,
-        };
-      });
-
-      await this.poDetailModel.insertMany(newDetailRows);
-
-      newPO.po_amount = newAmount;
-      await newPO.save();
-
-      return {
-        message: 'Purchase Order Revised Successfully',
-        po_no,
-        new_po_id: newPO._id,
-      };
-    } catch (err) {
-      console.log('REVISION ERROR => ', err);
-      throw err;
-    }
-  }
-
-  // =========================================================================
-  // GET STATUS (CORRECTED PENDING LOGIC)
-  // =========================================================================
-  async getPoStatus(id: string) {
-    let poMaster: any = null;
-
-    if (Types.ObjectId.isValid(id)) {
-      poMaster = await this.poMasterModel.findById(id);
-    }
-    if (!poMaster) {
-      poMaster = await this.poMasterModel.findOne({
-        po_no: id,
-        po_is_active: true,
-      });
-    }
-    if (!poMaster) throw new NotFoundException('PO Not Found');
-
-    const allRevisions = await this.poMasterModel.find({
-      po_no: poMaster.po_no,
+    const oldPO: any = await this.poMasterModel.findOne({
+      po_no,
+      po_is_active: true,
     });
+
+    if (!oldPO) throw new NotFoundException('Active PO Not Found');
+
+    const oldDetails = await this.poDetailModel.find({ po_id: oldPO._id });
+    const allRevisions = await this.poMasterModel.find({ po_no });
     const poIds = allRevisions.map((p) => p._id);
-
-    const poDetails = await this.poDetailModel.find({
-      po_id: poMaster._id,
-    });
 
     const grnDetails = await this.grnDetailModel
       .find({})
-      .populate({
-        path: 'grn_id',
-        select: 'po_id grn_no grn_date',
-      });
+      .populate({ path: 'grn_id', select: 'po_id' });
 
-    const finalData = poDetails.map((row) => {
+    const oldPendingMap: Record<number, number> = {};
+    const oldRateMap: Record<number, number> = {};
+
+    oldDetails.forEach((row) => {
+      oldRateMap[row.po_sr] = row.po_rate ?? 0;
+
       const received = grnDetails
         .filter((g) => {
           const grnPoId = (g.grn_id as any)?.po_id;
@@ -211,6 +112,89 @@ export class PurchaseService {
 
       const totalRequired = row.po_qty + (row.po_adj_qty || 0);
       const pending = totalRequired - received;
+      oldPendingMap[row.po_sr] = pending > 0 ? pending : 0;
+    });
+
+    oldPO.po_is_active = false;
+    await oldPO.save();
+
+    const newPO = await this.poMasterModel.create({
+      po_no,
+      po_date: dto.po_date,
+      po_amount: 0,
+      sup_id: oldPO.sup_id,
+      transportation: oldPO.transportation,
+      notes: oldPO.notes,
+      po_rev_reason: dto.po_rev_reason,
+      po_rev: oldPO.po_rev + 1,
+      po_is_active: true,
+      po_is_closed: false,
+      prev_po_id: oldPO._id,
+    });
+
+    let newAmount = 0;
+
+    const newDetailRows = dto.details.map((row) => {
+      const rate =
+        row.po_rate !== undefined ? row.po_rate : (oldRateMap[row.po_sr] ?? 0);
+      const adjQty = oldPendingMap[row.po_sr] ?? 0;
+      const totalRequired = row.po_qty + adjQty;
+      const subTotal = totalRequired * rate;
+
+      newAmount += subTotal;
+
+      return {
+        po_id: newPO._id,
+        po_sr: row.po_sr,
+        pro_id: row.pro_id,
+        po_qty: row.po_qty,
+        po_rate: rate,
+        po_sub_total: subTotal,
+        po_adj_qty: adjQty,
+      };
+    });
+
+    await this.poDetailModel.insertMany(newDetailRows);
+
+    newPO.po_amount = newAmount;
+    await newPO.save();
+
+    return {
+      message: 'Purchase Order Revised Successfully ✅',
+      po_no,
+      new_po_id: newPO._id,
+    };
+  }
+
+  // ==================================================
+  // SINGLE PO STATUS + AUTO CLOSE
+  // ==================================================
+  async getPoStatus(id: string): Promise<PoStatusResult> {
+    let poMaster: any = null;
+
+    if (Types.ObjectId.isValid(id)) {
+      poMaster = await this.poMasterModel.findById(id);
+    }
+
+    if (!poMaster) {
+      poMaster = await this.poMasterModel.findOne({
+        po_no: id,
+        po_is_active: true,
+      });
+    }
+
+    if (!poMaster) throw new NotFoundException('PO Not Found');
+
+    const poDetails = await this.poDetailModel.find({ po_id: poMaster._id });
+    const grnDetails = await this.grnDetailModel.find({ po_id: poMaster._id });
+
+    const finalData = poDetails.map((row) => {
+      const received = grnDetails
+        .filter((g) => g.po_sr === row.po_sr)
+        .reduce((sum, x) => sum + x.grn_rec_qty, 0);
+
+      const totalRequired = row.po_qty + (row.po_adj_qty || 0);
+      const pending = totalRequired - received;
 
       return {
         ...row.toObject(),
@@ -220,10 +204,39 @@ export class PurchaseService {
       };
     });
 
+    const isCompleted = finalData.every((x) => x.status === 'Completed');
+
+    if (isCompleted && !poMaster.po_is_closed) {
+      await this.poMasterModel.updateOne(
+        { _id: poMaster._id },
+        { po_is_closed: true },
+      );
+    }
+
     return {
-      message: 'Success',
+      message: 'PO Status Generated ✅',
+      po_status: isCompleted ? 'Closed' : 'Open',
       poMaster,
       details: finalData,
+    };
+  }
+
+  // ==================================================
+  // ALL PO STATUS
+  // ==================================================
+  async getAllPoStatus() {
+    const activePOs = await this.poMasterModel.find({ po_is_active: true });
+    const result: PoStatusResult[] = [];
+
+    for (const po of activePOs) {
+      const status = await this.getPoStatus(po._id.toString());
+      result.push(status);
+    }
+
+    return {
+      message: 'All Purchase Order Status ✅',
+      total: result.length,
+      data: result,
     };
   }
 }

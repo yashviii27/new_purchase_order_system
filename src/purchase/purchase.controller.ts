@@ -13,12 +13,22 @@ export class PurchaseController {
   }
 
   @Post(':po_no/revision')
-  async revise(@Param('po_no') po_no: string, @Body() dto: PurchaseRevisionDto) {
+  async revise(
+    @Param('po_no') po_no: string,
+    @Body() dto: PurchaseRevisionDto,
+  ) {
     return this.purchaseService.revisePurchase(po_no, dto);
   }
 
+  // ✅ GET ALL PO STATUS
+  @Get('status')
+  async getAllStatus() {
+    return this.purchaseService.getAllPoStatus();
+  }
+
+  // ✅ GET SINGLE PO STATUS (po_no OR ObjectId)
   @Get(':id/status')
-  async status(@Param('id') id: string) {
+  async getSingleStatus(@Param('id') id: string) {
     return this.purchaseService.getPoStatus(id);
   }
 }

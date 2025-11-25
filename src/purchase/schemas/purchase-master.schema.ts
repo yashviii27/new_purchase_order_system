@@ -5,7 +5,6 @@ export type PurchaseMasterDocument = PurchaseMaster & Document;
 
 @Schema({ timestamps: true })
 export class PurchaseMaster {
-
   @Prop({ required: true })
   po_no: string;
 
@@ -33,8 +32,12 @@ export class PurchaseMaster {
   @Prop()
   notes?: string;
 
+  @Prop({ default: false })
+  po_is_closed: boolean; // ✅ AUTO CLOSE FLAG
+
   @Prop({ type: Types.ObjectId, ref: 'PurchaseMaster' })
   prev_po_id?: Types.ObjectId; // previous revision reference
 }
 
-export const PurchaseMasterSchema = SchemaFactory.createForClass(PurchaseMaster);
+export const PurchaseMasterSchema =
+  SchemaFactory.createForClass(PurchaseMaster);

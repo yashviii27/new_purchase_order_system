@@ -1,20 +1,44 @@
-import { IsArray, IsDateString, IsString, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsDateString,
+  IsOptional,
+  IsArray,
+  ValidateNested,
+  IsNumber
+} from 'class-validator';
 import { Type } from 'class-transformer';
-import { GrnDetailDto } from './grn-detail.dto';
+
+class GrnItemDto {
+
+  @IsNumber()
+  @Type(() => Number)
+  po_sr: number;
+
+  @IsNumber()
+  @Type(() => Number)
+  pro_id: number;
+
+  @IsNumber()
+  @Type(() => Number)
+  grn_rec_qty: number;
+}
 
 export class CreateGrnDto {
 
   @IsString()
-  po_id: string;
+  po_no: string;
 
   @IsString()
   grn_no: string;
 
   @IsDateString()
-  grn_date: string;
+  grn_date: Date;
+
+  @IsOptional()
+  allow_extra_stock?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => GrnDetailDto)
-  details: GrnDetailDto[];
+  @Type(() => GrnItemDto)
+  details: GrnItemDto[];
 }
